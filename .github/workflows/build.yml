@@ -33,7 +33,7 @@ jobs:
           fi
 
       - name: Unit tests
-        run: ./gradlew --no-daemon --stacktrace testReleaseUnitTest 2>&1 | tee test.log; exit ${PIPESTATUS[0]}
+        run: ./gradlew --no-daemon --stacktrace testDebugUnitTest 2>&1 | tee test.log; exit ${PIPESTATUS[0]}
 
       - name: Build release APK
         env:
