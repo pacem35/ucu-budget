@@ -47,7 +47,7 @@ jobs:
         if: failure()
         run: |
           cat test.log build.log 2>/dev/null \
-            | grep -E "^e: |What went wrong|^> |error:|FAILED|AssertionError|Exception|Caused by|Could not" \
+            | grep -E "^e: |What went wrong|^> |error:|FAILED|AssertionError|Exception|Caused by|Could not|build.gradle:" \
             | grep -v "^> Task" | head -120 > errors.txt || true
           split -l 12 errors.txt chunk_
           for f in chunk_*; do

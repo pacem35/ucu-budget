@@ -4,6 +4,7 @@ plugins {
 }
 
 def ksFile = System.getenv("SIGNING_KEYSTORE_PATH")
+def runNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1") as Integer
 
 android {
     namespace 'com.pacemckinney.tally'
@@ -13,8 +14,8 @@ android {
         applicationId "com.pacemckinney.tally"
         minSdk 26
         targetSdk 36
-        versionCode (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
-        versionName "1.0.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
+        versionCode runNumber
+        versionName "1.0.${runNumber}"
     }
 
     def hasKey = ksFile != null && file(ksFile).exists()
