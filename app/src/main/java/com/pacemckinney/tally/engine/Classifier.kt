@@ -157,7 +157,7 @@ class Classifier(txns: List<Txn>, accounts: List<Account> = emptyList()) {
         val ACCOUNT_REF = Regex("""(?i)\b(?:transfer|xfer|payment|pmt)\b.*?\b([SL])(\d{4})\b""")
 
         val DEBT_PAYEE = Regex(
-            """(?i)credit repay|paypal[ _]?credit|pay ?mthly|paymthly|pay ?monthly|\baffirm\b|klarna|afterpay|sezzle|""" +
+            """(?i)credit repay|paypal[ _]?credit|pay ?mth|pay ?monthly|\baffirm\b|klarna|afterpay|sezzle|""" +
                 """synchrony|comenity|credit ?one|mission ?lane|capital ?one.*(pmt|payment)|discover.*(pmt|payment)|""" +
                 """amex.*(pmt|payment)|card ?services.*(pmt|payment)""",
         )
