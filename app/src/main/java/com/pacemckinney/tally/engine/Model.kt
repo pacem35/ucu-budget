@@ -27,6 +27,27 @@ data class Txn(
     val isOutflow: Boolean get() = amount > 0
 }
 
+/** What an account is for, which decides how money moving in and out of it is counted. */
+enum class AccountRole(val label: String) {
+    SPENDING("Spending (checking)"),
+    SAVINGS("Savings"),
+    CREDIT("Credit card"),
+    LOAN("Loan"),
+    ;
+
+    companion object {
+        fun default(type: String, subtype: String?): AccountRole = when (type) {
+            "credit" -> CREDIT
+            "loan" -> LOAN
+            "investment" -> SAVINGS
+            else -> when (subtype) {
+                "savings", "money market", "cd", "hsa", "cash management" -> SAVINGS
+                else -> SPENDING
+            }
+        }
+    }
+}
+
 data class Account(
     val id: String,
     val itemId: String,
@@ -37,11 +58,26 @@ data class Account(
     val current: Double?,
     val available: Double?,
     val creditLimit: Double? = null,
+    /** Your choice; null = use the default for this account type. */
+    val roleOverride: AccountRole? = null,
+    /** False = not yours / don't care. Its balance and transactions are ignored everywhere. */
+    val included: Boolean = true,
+    val nickname: String? = null,
+    /** True once you've looked at this account in the account manager. */
+    val reviewed: Boolean = false,
 ) {
+    val role: AccountRole get() = roleOverride ?: AccountRole.default(type, subtype)
+    val displayName: String get() = nickname?.takeIf { it.isNotBlank() } ?: cleanName
+    /** Plaid sometimes prefixes UCU loan/card names with the masked member number. */
+    val cleanName: String get() = name.replace(Regex("^\\*+\\d*\\s*\\d{4}\\s+"), "").ifBlank { name }
     val isDepository get() = type == "depository"
-    val isChecking get() = isDepository && subtype == "checking"
+    val isChecking get() = role == AccountRole.SPENDING
     /** What you can actually spend right now from this account. */
     val spendable: Double get() = available ?: current ?: 0.0
+    /** For credit cards and loans: how much you owe. */
+    val owed: Double get() = current ?: 0.0
+    val limit: Double? get() = creditLimit ?: if (role == AccountRole.CREDIT && available != null && current != null) current + available else null
+    val utilization: Double? get() = limit?.takeIf { it > 0 }?.let { owed / it }
 }
 
 data class Budget(val category: String, val monthlyLimit: Double)
@@ -66,13 +102,19 @@ object Categories {
     const val OTHER = "OTHER"
     /** User-only category: leave this transaction out of every total. */
     const val EXCLUDED = "EXCLUDED"
+    /** User-only: money put into (or, if it came in, taken out of) savings. */
+    const val SAVINGS = "SAVINGS"
+    /** User-only: just moving your own money around; ignored. */
+    const val INTERNAL = "INTERNAL"
 
     val labels = linkedMapOf(
         FOOD_AND_DRINK to "Food & drink",
         GENERAL_MERCHANDISE to "Shopping",
         TRANSPORTATION to "Gas & transportation",
         RENT_AND_UTILITIES to "Rent & utilities",
-        LOAN_PAYMENTS to "Loan payments",
+        LOAN_PAYMENTS to "Loan / debt payment",
+        SAVINGS to "Savings",
+        INTERNAL to "Between my accounts",
         ENTERTAINMENT to "Entertainment",
         GENERAL_SERVICES to "Services",
         PERSONAL_CARE to "Personal care",
@@ -89,7 +131,7 @@ object Categories {
     )
 
     /** Categories a person might put a spending budget on. */
-    val budgetable = labels.keys.filter { it !in setOf(INCOME, TRANSFER_IN, EXCLUDED) }
+    val budgetable = labels.keys.filter { it !in setOf(INCOME, TRANSFER_IN, EXCLUDED, SAVINGS, INTERNAL, LOAN_PAYMENTS) }
 
     fun label(c: String) = labels[c] ?: c.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }
 }

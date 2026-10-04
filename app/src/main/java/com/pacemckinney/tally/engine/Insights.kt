@@ -41,6 +41,44 @@ data class SafeToSpend(
     fun perDay(today: LocalDate): Double = amount / max(1, ChronoUnit.DAYS.between(today, horizon).toInt())
 }
 
+/** One calendar month of money flow, split the four ways that matter. */
+data class MonthFlow(
+    val month: YearMonth,
+    val income: Double,
+    val spending: Double,
+    /** Net moved into savings (negative if you pulled more out than you put in). */
+    val saved: Double,
+    val loanPayments: Double,
+) {
+    /** Income not yet spent, saved or used to pay down debt. */
+    val leftOver: Double get() = income - spending - saved - loanPayments
+    val savingsRate: Double? get() = if (income > 0) saved / income else null
+}
+
+data class LoanStatus(
+    val account: Account,
+    val owed: Double,
+    val paidThisMonth: Double,
+    /** Average monthly payment over the last 3 months. */
+    val monthlyPayment: Double,
+) {
+    /** Rough months to payoff, ignoring interest. */
+    val monthsLeft: Int? get() = if (monthlyPayment > 1 && owed > 0) kotlin.math.ceil(owed / monthlyPayment).toInt() else null
+}
+
+data class Balances(
+    /** Spendable cash across your tracked checking accounts. */
+    val cash: Double,
+    val savings: Double,
+    val creditOwed: Double,
+    val creditLimit: Double,
+    val loansOwed: Double,
+) {
+    val creditUtilization: Double? get() = if (creditLimit > 0) creditOwed / creditLimit else null
+    /** What you have minus what you owe. */
+    val netWorth: Double get() = cash + savings - creditOwed - loansOwed
+}
+
 /** Everything the screens need, computed in one pass from the stored data. */
 data class Snapshot(
     val today: LocalDate,
@@ -61,8 +99,18 @@ data class Snapshot(
     val safeToSpend: SafeToSpend?,
     val insights: List<Insight>,
     val totalSpendable: Double,
+    val thisMonth: MonthFlow,
+    /** Oldest first; includes this month. */
+    val history: List<MonthFlow>,
+    val balances: Balances,
+    val loans: List<LoanStatus>,
+    /** Income this month by category (paychecks, interest, transfers in...). */
+    val incomeSources: List<CategorySpend>,
+    val savingsGoal: Double?,
 ) {
-    val net: Double get() = incomeMtd - spendMtd
+    val net: Double get() = thisMonth.leftOver
+    val savedMtd: Double get() = thisMonth.saved
+    val loanPaidMtd: Double get() = thisMonth.loanPayments
 }
 
 object InsightEngine {
@@ -92,6 +140,22 @@ object InsightEngine {
     fun income(txns: List<Txn>, c: Classifier, from: LocalDate, toInclusive: LocalDate): Double =
         txns.filter { it.date in from..toInclusive && c.kind(it) == Kind.INCOME }.sumOf { -it.amount }
 
+    private fun sumKind(txns: List<Txn>, c: Classifier, kind: Kind, from: LocalDate, toInclusive: LocalDate): Double =
+        txns.filter { it.date in from..toInclusive && c.kind(it) == kind }.sumOf { it.amount }
+
+    fun flow(txns: List<Txn>, c: Classifier, month: YearMonth, through: LocalDate = month.atEndOfMonth()): MonthFlow {
+        val from = month.atDay(1)
+        return MonthFlow(
+            month = month,
+            income = income(txns, c, from, through),
+            spending = spendByCategory(txns, c, from, through).sumOf { it.amount },
+            saved = sumKind(txns, c, Kind.SAVINGS, from, through),
+            loanPayments = sumKind(txns, c, Kind.LOAN_PAYMENT, from, through),
+        )
+    }
+
+    private fun pct(v: Double) = "${(v * 100).roundToInt()}%"
+
     private fun cumulative(txns: List<Txn>, c: Classifier, month: YearMonth, throughDay: Int): List<Double> {
         val daily = DoubleArray(throughDay)
         for (t in txns) {
@@ -110,8 +174,14 @@ object InsightEngine {
         today: LocalDate,
         largeTxnThreshold: Double = 200.0,
         lowBalanceThreshold: Double = 100.0,
+        savingsGoal: Double? = null,
     ): Snapshot {
-        val c = Classifier(txns)
+        val c = Classifier(txns, accounts)
+        // Everything below ignores accounts you've hidden.
+        @Suppress("NAME_SHADOWING")
+        val txns = txns.filter { c.kind(it) != Kind.HIDDEN }
+        @Suppress("NAME_SHADOWING")
+        val accounts = accounts.filter { it.included }
         val month = YearMonth.from(today)
         val day = today.dayOfMonth
         val monthStart = month.atDay(1)
@@ -127,7 +197,10 @@ object InsightEngine {
         val lastTotal = spendByCategory(txns, c, lastStart, lastEnd).sumOf { it.amount }
 
         val recurring = Recurring.detect(txns, c, today)
-        val bills = recurring.filter { !it.isIncome }
+        // Everything that leaves checking on a schedule (bills, loan payments, auto-savings)…
+        val outgoing = recurring.filter { it.isOutgoing }
+        // …of which "bills" are the ones that count as spending.
+        val bills = recurring.filter { it.kind == Kind.SPEND }
         val paydays = recurring.filter { it.isIncome && it.typicalAmount >= 100 }
         val nextPayday = paydays.minByOrNull { it.nextDate }
 
@@ -147,13 +220,40 @@ object InsightEngine {
         }
         val projected = spendMtd + billsLeftThisMonth + dailyVariable * remainingDays
 
-        val depository = accounts.filter { it.isDepository }
-        val spendAccounts = depository.filter { it.isChecking }.ifEmpty { depository }
+        val spendAccounts = accounts.filter { it.role == AccountRole.SPENDING }
         val totalSpendable = spendAccounts.sumOf { it.spendable }
+        val credit = accounts.filter { it.role == AccountRole.CREDIT }
+        val balances = Balances(
+            cash = totalSpendable,
+            savings = accounts.filter { it.role == AccountRole.SAVINGS }.sumOf { it.current ?: it.available ?: 0.0 },
+            creditOwed = credit.sumOf { it.owed },
+            creditLimit = credit.sumOf { it.limit ?: 0.0 },
+            loansOwed = accounts.filter { it.role == AccountRole.LOAN }.sumOf { it.owed },
+        )
+
+        val thisMonth = flow(txns, c, month, today)
+        val history = (5 downTo 1).map { flow(txns, c, month.minusMonths(it.toLong())) } + thisMonth
+        val incomeSources = run {
+            val m = HashMap<String, Double>()
+            txns.filter { it.date in monthStart..today && c.kind(it) == Kind.INCOME }
+                .forEach { m[it.effectiveCategory] = (m[it.effectiveCategory] ?: 0.0) - it.amount }
+            m.map { CategorySpend(it.key, it.value, 0) }.sortedByDescending { it.amount }
+        }
+
+        val ninetyAgo = today.minusDays(90)
+        val loans = accounts.filter { it.role == AccountRole.LOAN }.map { loan ->
+            val payments = txns.filter { c.kind(it) == Kind.LOAN_PAYMENT && c.counterpartOf(it)?.id == loan.id }
+            LoanStatus(
+                account = loan,
+                owed = loan.owed,
+                paidThisMonth = payments.filter { it.date >= monthStart }.sumOf { it.amount },
+                monthlyPayment = payments.filter { it.date > ninetyAgo }.sumOf { it.amount } / 3,
+            )
+        }.sortedByDescending { it.owed }
 
         val safe = if (spendAccounts.isEmpty()) null else {
             val horizon = nextPayday?.nextDate?.takeIf { it > today } ?: month.atEndOfMonth().plusDays(1)
-            val due = bills.flatMap { s -> Recurring.occurrencesBetween(s, today, horizon).map { s to it } }
+            val due = outgoing.flatMap { s -> Recurring.occurrencesBetween(s, today, horizon).map { s to it } }
                 .sortedBy { it.second }
             SafeToSpend(totalSpendable, due.sumOf { it.first.typicalAmount }, due, horizon, nextPayday != null)
         }
@@ -172,9 +272,9 @@ object InsightEngine {
             val until = if (safe.horizonIsPayday) "payday (${safe.horizon.format(dayFmt)})" else "the end of the month"
             val perDay = safe.perDay(today)
             if (safe.amount < 0) add(Insight("safe", Severity.ALERT, "Bills exceed your balance",
-                "${money(safe.billsBeforeHorizon)} in expected bills before $until, but only ${money(safe.spendableNow)} available. Short by ${money(-safe.amount)}."))
+                "${money(safe.billsBeforeHorizon)} in expected bills, loan payments and savings transfers before $until, but only ${money(safe.spendableNow)} available. Short by ${money(-safe.amount)}."))
             else add(Insight("safe", if (perDay < 15) Severity.WARN else Severity.GOOD, "${money(perDay)}/day until $until",
-                "${money(safe.spendableNow)} available minus ${money(safe.billsBeforeHorizon)} in upcoming bills leaves ${money(safe.amount)} to spend."))
+                "${money(safe.spendableNow)} available minus ${money(safe.billsBeforeHorizon)} set aside for bills, loans and savings leaves ${money(safe.amount)} to spend."))
         }
 
         // 2. Pace vs last month.
@@ -277,7 +377,7 @@ object InsightEngine {
 
         // 10. Low balance.
         for (a in spendAccounts) if (a.spendable < lowBalanceThreshold) add(Insight("low-${a.id}", Severity.ALERT,
-            "Low balance in ${a.name}", "${money(a.spendable)} available."))
+            "Low balance in ${a.displayName}", "${money(a.spendable)} available."))
 
         // 11. Subscriptions summary.
         val subs = bills.filter { it.cadence == Cadence.MONTHLY && it.category in setOf(Categories.ENTERTAINMENT, Categories.GENERAL_SERVICES, Categories.GENERAL_MERCHANDISE) }
@@ -290,12 +390,59 @@ object InsightEngine {
                 "Usually ${money(it.typicalAmount)}, ${it.cadence.label}."))
         }
 
-        // 13. Net for the month.
+        // 13. Where this month's income went.
         if (incomeMtd > 0 && day >= 10) {
-            val n = incomeMtd - spendMtd
+            val f = thisMonth
+            val n = f.leftOver
             add(Insight("net", if (n >= 0) Severity.GOOD else Severity.WARN,
-                if (n >= 0) "Up ${money(n)} this month" else "Down ${money(-n)} this month",
-                "${money(incomeMtd)} in, ${money(spendMtd)} out."))
+                if (n >= 0) "${money(n)} of this month's income is unassigned" else "Outflows are ${money(-n)} more than income",
+                "${money(f.income)} in → ${money(f.spending)} spent, ${money(f.loanPayments)} to loans, ${money(f.saved)} saved."))
+        }
+
+        // 14. Savings.
+        val saved = thisMonth.saved
+        when {
+            saved < -1 -> add(Insight("savings", Severity.WARN, "Pulled ${money(-saved)} out of savings this month",
+                "Savings balance is ${money(balances.savings)}."))
+            saved > 1 -> add(Insight("savings", Severity.GOOD, "Saved ${money(saved)} this month" +
+                (thisMonth.savingsRate?.let { " (${pct(it)} of income)" } ?: ""),
+                "Savings balance is ${money(balances.savings)}."))
+        }
+        if (savingsGoal != null && savingsGoal > 0) {
+            val frac = saved / savingsGoal
+            val expected = savingsGoal * day / month.lengthOfMonth()
+            add(Insight("savings-goal", when {
+                frac >= 1 -> Severity.GOOD
+                saved < expected * 0.5 && day >= 15 -> Severity.WARN
+                else -> Severity.INFO
+            }, "Savings goal: ${money(maxOf(saved, 0.0))} of ${money(savingsGoal)}",
+                if (frac >= 1) "Goal reached for ${month.month.name.lowercase().replaceFirstChar { it.uppercase() }}."
+                else "${money(savingsGoal - maxOf(saved, 0.0))} to go this month."))
+        } else {
+            // Compare with your own track record.
+            val past = history.dropLast(1).filter { it.income > 0 }
+            if (past.size >= 3 && saved <= 1 && day >= 20) {
+                val avg = past.sumOf { it.saved } / past.size
+                if (avg > 25) add(Insight("savings-behind", Severity.INFO, "Nothing saved yet this month",
+                    "You've averaged ${money(avg)}/month into savings recently."))
+            }
+        }
+
+        // 15. Credit cards.
+        for (a in credit) {
+            val u = a.utilization ?: continue
+            if (u >= 0.3) add(Insight("util-${a.id}", if (u >= 0.9) Severity.ALERT else Severity.WARN,
+                "${a.displayName} is at ${pct(u)} of its limit",
+                "${money(a.owed)} owed of ${money(a.limit ?: 0.0)}. Keeping it under 30% helps your credit score."))
+        }
+
+        // 16. Loans.
+        for (l in loans) {
+            val months = l.monthsLeft
+            if (months != null) add(Insight("loan-${l.account.id}", Severity.INFO,
+                "${l.account.displayName}: ${money(l.owed)} left",
+                "Paying about ${money(l.monthlyPayment)}/month — roughly $months more payment${if (months == 1) "" else "s"}, not counting interest" +
+                    (if (l.paidThisMonth > 0) ". ${money(l.paidThisMonth)} paid this month." else ".")))
         }
 
         val order = listOf(Severity.ALERT, Severity.WARN, Severity.GOOD, Severity.INFO)
@@ -316,6 +463,12 @@ object InsightEngine {
             safeToSpend = safe,
             insights = insights.sortedBy { order.indexOf(it.severity) },
             totalSpendable = totalSpendable,
+            thisMonth = thisMonth,
+            history = history,
+            balances = balances,
+            loans = loans,
+            incomeSources = incomeSources,
+            savingsGoal = savingsGoal,
         )
     }
 }

@@ -55,7 +55,7 @@ class Notifier(private val c: Context, private val repo: Repo) {
     fun afterSync(newTxns: List<Txn>) {
         val p = repo.prefs
         val all = repo.db.txns(java.time.LocalDate.now().minusDays(45))
-        val classifier = Classifier(all)
+        val classifier = Classifier(all, repo.db.accounts())
 
         val spends = newTxns.filter { classifier.kind(it) == Kind.SPEND && (p.notifyEveryTxn || it.amount >= p.notifyThreshold) }
         if (spends.size == 1) {

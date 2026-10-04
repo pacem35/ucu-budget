@@ -37,6 +37,8 @@ import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Restaurant
+import androidx.compose.material.icons.outlined.Savings
+import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.ShoppingBag
 import androidx.compose.material.icons.outlined.Spa
 import androidx.compose.material.icons.outlined.VolunteerActivism
@@ -97,6 +99,8 @@ fun categoryIcon(c: String): ImageVector = when (c) {
     Categories.TRANSFER_IN -> Icons.Outlined.CallReceived
     Categories.INCOME -> Icons.Outlined.Work
     Categories.EXCLUDED -> Icons.Outlined.Block
+    Categories.SAVINGS -> Icons.Outlined.Savings
+    Categories.INTERNAL -> Icons.Outlined.SwapHoriz
     else -> Icons.Outlined.MoreHoriz
 }
 
@@ -165,24 +169,48 @@ fun InsightRow(i: Insight, onClick: (() -> Unit)? = null) {
     }
 }
 
+/** Colour for each kind of money, used in rows, bars and charts. */
 @Composable
-fun TxnRow(t: Txn, kind: Kind?, onClick: () -> Unit) {
+fun kindColor(k: Kind?): Color {
+    val tones = LocalTones.current
+    return when (k) {
+        Kind.INCOME -> tones.income
+        Kind.SAVINGS -> tones.savings
+        Kind.LOAN_PAYMENT -> tones.loan
+        Kind.INTERNAL, Kind.EXCLUDED, Kind.HIDDEN -> tones.muted
+        else -> MaterialTheme.colorScheme.secondary
+    }
+}
+
+fun kindIcon(k: Kind?, category: String): ImageVector = when (k) {
+    Kind.SAVINGS -> Icons.Outlined.Savings
+    Kind.LOAN_PAYMENT -> Icons.Outlined.AccountBalance
+    Kind.INTERNAL -> Icons.Outlined.SwapHoriz
+    else -> categoryIcon(category)
+}
+
+@Composable
+fun TxnRow(t: Txn, kind: Kind?, note: String?, accountLabel: String?, onClick: () -> Unit) {
     val tones = LocalTones.current
     val inflow = t.amount < 0
     val dimmed = kind == Kind.INTERNAL || kind == Kind.EXCLUDED
+    val tint = kindColor(kind)
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CategoryBadge(t.effectiveCategory, if (inflow) tones.income else MaterialTheme.colorScheme.secondary)
+        Box(
+            Modifier.size(36.dp).clip(CircleShape).background(tint.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) { Icon(kindIcon(kind, t.effectiveCategory), null, tint = tint, modifier = Modifier.size(20.dp)) }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(t.displayName, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val sub = buildString {
-                append(Categories.label(t.effectiveCategory))
-                if (kind == Kind.INTERNAL) append(" · between your accounts")
-                if (t.userCategory != null) append(" · edited")
-            }
+            val sub = listOfNotNull(
+                note ?: Categories.label(t.effectiveCategory),
+                accountLabel,
+                if (t.userCategory != null) "edited" else null,
+            ).joinToString(" · ")
             Text(sub, style = MaterialTheme.typography.bodySmall, color = tones.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(8.dp))
@@ -193,11 +221,33 @@ fun TxnRow(t: Txn, kind: Kind?, onClick: () -> Unit) {
                 fontWeight = FontWeight.Medium,
                 color = when {
                     dimmed -> tones.muted
+                    kind == Kind.SAVINGS || kind == Kind.LOAN_PAYMENT -> tint
                     inflow -> tones.income
                     else -> MaterialTheme.colorScheme.onSurface
                 },
             )
             if (t.pending) Text("Pending", style = MaterialTheme.typography.labelSmall, color = tones.warn)
+        }
+    }
+}
+
+/**
+ * One bar split into coloured segments (e.g. where income went). Values are drawn left to right
+ * as fractions of [total]; anything past the total is clipped.
+ */
+@Composable
+fun SegmentBar(segments: List<Pair<Double, Color>>, total: Double, modifier: Modifier = Modifier) {
+    val track = MaterialTheme.colorScheme.surfaceContainerHighest
+    Canvas(modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp))) {
+        drawRect(track)
+        if (total <= 0) return@Canvas
+        var x = 0f
+        for ((v, color) in segments) {
+            if (v <= 0) continue
+            val w = (v / total * size.width).toFloat().coerceAtMost(size.width - x)
+            if (w <= 0) break
+            drawRect(color, topLeft = Offset(x, 0f), size = androidx.compose.ui.geometry.Size(w, size.height))
+            x += w + 2f
         }
     }
 }
@@ -278,7 +328,12 @@ fun CategoryPickerDialog(txn: Txn, onDismiss: () -> Unit, onPick: (String?, Bool
                             RadioButton(selected = selected == c, onClick = { selected = c })
                             Icon(categoryIcon(c), null, Modifier.size(18.dp), tint = LocalTones.current.muted)
                             Spacer(Modifier.width(8.dp))
-                            Text(Categories.label(c) + if (c == Categories.EXCLUDED) " (ignore in totals)" else "")
+                            Text(Categories.label(c) + when (c) {
+                                Categories.EXCLUDED -> " (ignore in totals)"
+                                Categories.SAVINGS -> " (money set aside)"
+                                Categories.INTERNAL -> " (ignore)"
+                                else -> ""
+                            })
                         }
                     }
                 }

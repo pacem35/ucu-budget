@@ -20,7 +20,7 @@ enum class Cadence(val days: Int, val tolerance: Int, val label: String) {
 data class RecurringStream(
     val key: String,
     val name: String,
-    val isIncome: Boolean,
+    val kind: Kind,
     val cadence: Cadence,
     val typicalAmount: Double,
     val lastAmount: Double,
@@ -30,6 +30,10 @@ data class RecurringStream(
     val category: String,
     val occurrences: Int,
 ) {
+    val isIncome: Boolean get() = kind == Kind.INCOME
+    /** Money that has to leave checking on schedule: bills, loan payments, automatic savings. */
+    val isOutgoing: Boolean get() = kind == Kind.SPEND || kind == Kind.LOAN_PAYMENT || kind == Kind.SAVINGS
+
     /** Roughly what this costs (or pays) per month. */
     val monthlyAmount: Double get() = typicalAmount * 30.4 / cadence.days
 }
@@ -54,12 +58,15 @@ object Recurring {
         val window = today.minusDays(200)
         val relevant = txns.filter {
             !it.pending && it.date >= window && it.date <= today &&
-                classifier.kind(it).let { k -> k == Kind.SPEND || k == Kind.INCOME }
+                classifier.kind(it).let { k ->
+                    k == Kind.SPEND || k == Kind.INCOME || k == Kind.LOAN_PAYMENT || (k == Kind.SAVINGS && it.amount > 0)
+                }
         }
-        val groups = relevant.groupBy { key(it) to (it.amount < 0) }
+        val groups = relevant.groupBy { key(it) to classifier.kind(it) }
         val out = ArrayList<RecurringStream>()
         for ((k, list) in groups) {
-            val (name, isIncome) = k
+            val (name, kind) = k
+            val isIncome = kind == Kind.INCOME
             if (list.size < 3) continue
             val sorted = list.sortedBy { it.date }
             // Two charges on the same day are one billing event (e.g. split payments).
@@ -84,7 +91,7 @@ object Recurring {
             out += RecurringStream(
                 key = name,
                 name = sorted.last().displayName,
-                isIncome = isIncome,
+                kind = kind,
                 cadence = cadence,
                 typicalAmount = median,
                 lastAmount = last.second,

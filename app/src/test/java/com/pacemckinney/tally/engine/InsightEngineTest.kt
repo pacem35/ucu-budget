@@ -144,4 +144,127 @@ class InsightEngineTest {
     }
 
     private fun <T> assertNotNullAndGet(v: T?): T { assertNotNull(v); return v!! }
+
+    // ---- Account roles: savings, loans, credit cards, hidden accounts ----
+
+    private val fullAccounts = listOf(
+        Account("chk", "item", "Main-Checking", "0009", "depository", "checking", 1005.0, 866.79),
+        Account("sav", "item", "Share/Savings", "0001", "depository", "savings", 4860.0, 4859.0),
+        Account("visa", "item", "******8720 3701 Visa Platinum", "3701", "credit", "credit card", 346.28, 153.72),
+        Account("car", "item", "******8720 1201 2010 Honda Accord", "1201", "loan", "auto", 3086.0, 0.0),
+        Account("other", "item", "Checking - Reward", "0079", "depository", "checking", 1545.0, 1481.0, included = false),
+    )
+
+    @Test fun savingsTransfersCountOnceAsSaved() {
+        val out = t(today, 300.0, "TRANSFER TO SHARE", Categories.TRANSFER_OUT)
+        val inn = t(today, -300.0, "TRANSFER FROM CHECKING", Categories.TRANSFER_IN, account = "sav")
+        val back = t(today, 50.0, "TRANSFER TO CHECKING", Categories.TRANSFER_OUT, account = "sav")
+        val backIn = t(today, -50.0, "TRANSFER FROM SHARE", Categories.TRANSFER_IN)
+        val c = Classifier(listOf(out, inn, back, backIn), fullAccounts)
+        assertEquals(Kind.SAVINGS, c.kind(out))
+        assertEquals(Kind.INTERNAL, c.kind(inn))
+        assertEquals(Kind.INTERNAL, c.kind(back))
+        assertEquals(Kind.SAVINGS, c.kind(backIn))
+        val f = InsightEngine.flow(listOf(out, inn, back, backIn), c, java.time.YearMonth.from(today))
+        assertEquals(250.0, f.saved, 0.001)
+        assertEquals(0.0, f.spending, 0.001)
+        assertEquals(0.0, f.income, 0.001)
+    }
+
+    @Test fun loanPaymentGoesToLoanBucket() {
+        val pay = t(today, 285.0, "LOAN PMT 1201", Categories.LOAN_PAYMENTS)
+        val post = t(today.plusDays(1), -285.0, "PAYMENT RECEIVED", Categories.LOAN_PAYMENTS, account = "car")
+        val interest = t(today, 12.0, "INTEREST", Categories.BANK_FEES, account = "car")
+        val c = Classifier(listOf(pay, post, interest), fullAccounts)
+        assertEquals(Kind.LOAN_PAYMENT, c.kind(pay))
+        assertEquals("car", c.counterpartOf(pay)?.id)
+        assertEquals(Kind.INTERNAL, c.kind(post))
+        assertEquals(Kind.INTERNAL, c.kind(interest))
+    }
+
+    @Test fun creditCardPurchasesCountAndPaymentsDoNot() {
+        val buy = t(today, 42.0, "WALMART", Categories.GENERAL_MERCHANDISE, account = "visa")
+        val pay = t(today, 200.0, "VISA PAYMENT", Categories.LOAN_PAYMENTS)
+        val got = t(today, -200.0, "PAYMENT THANK YOU", Categories.LOAN_PAYMENTS, account = "visa")
+        val refund = t(today, -42.0, "WALMART RETURN", Categories.GENERAL_MERCHANDISE, account = "visa")
+        val c = Classifier(listOf(buy, pay, got, refund), fullAccounts)
+        assertEquals(Kind.SPEND, c.kind(buy))
+        assertEquals(Kind.INTERNAL, c.kind(pay))
+        assertEquals(Kind.INTERNAL, c.kind(got))
+        assertEquals(Kind.REFUND, c.kind(refund))
+    }
+
+    @Test fun paymentToUntrackedCardIsDebtPayment() {
+        val pay = t(today, 150.0, "CAPITAL ONE PAYMENT", Categories.LOAN_PAYMENTS)
+        assertEquals(Kind.LOAN_PAYMENT, Classifier(listOf(pay), fullAccounts).kind(pay))
+    }
+
+    @Test fun hiddenAccountsAreIgnored() {
+        val theirs = t(today, 900.0, "SOMEONE ELSES RENT", Categories.RENT_AND_UTILITIES, account = "other")
+        val toThem = t(today, 100.0, "TRANSFER TO 0079", Categories.TRANSFER_OUT)
+        val atThem = t(today, -100.0, "TRANSFER FROM 0009", Categories.TRANSFER_IN, account = "other")
+        val txns = listOf(theirs, toThem, atThem)
+        val c = Classifier(txns, fullAccounts)
+        assertEquals(Kind.HIDDEN, c.kind(theirs))
+        assertEquals(Kind.HIDDEN, c.kind(atThem))
+        // Money you send to an account you don't track has left your world: it's spending.
+        assertEquals(Kind.SPEND, c.kind(toThem))
+        val s = InsightEngine.build(txns, fullAccounts, emptyList(), today)
+        assertEquals(100.0, s.spendMtd, 0.001)
+        assertEquals(866.79, s.totalSpendable, 0.001) // the hidden checking isn't counted
+    }
+
+    @Test fun balancesLoansAndUtilization() {
+        val txns = ArrayList<Txn>()
+        for (m in 7..10) {
+            val d = LocalDate.of(2026, m, 5)
+            txns += t(d, 285.0, "LOAN PMT 1201", Categories.LOAN_PAYMENTS)
+            txns += t(d, -285.0, "PAYMENT RECEIVED", Categories.LOAN_PAYMENTS, account = "car")
+        }
+        val s = InsightEngine.build(txns, fullAccounts, emptyList(), today)
+        assertEquals(866.79, s.balances.cash, 0.001)
+        assertEquals(4860.0, s.balances.savings, 0.001)
+        assertEquals(346.28, s.balances.creditOwed, 0.001)
+        assertEquals(500.0, s.balances.creditLimit, 0.001)
+        assertEquals(3086.0, s.balances.loansOwed, 0.001)
+        val loan = s.loans.single()
+        assertEquals(285.0, loan.paidThisMonth, 0.001)
+        assertEquals(285.0, loan.monthlyPayment, 0.001)
+        assertEquals(11, loan.monthsLeft)
+        assertEquals(285.0, s.loanPaidMtd, 0.001)
+        assertEquals(0.0, s.spendMtd, 0.001)
+        val ids = s.insights.map { it.id }
+        assertTrue("utilization warning expected: $ids", ids.contains("util-visa"))
+        assertTrue(ids.contains("loan-car"))
+        // The loan payment is set aside in safe-to-spend once it's a detected monthly payment.
+        assertTrue(s.recurring.any { it.kind == Kind.LOAN_PAYMENT })
+        assertEquals("2010 Honda Accord", fullAccounts[3].cleanName)
+        assertEquals("Visa Platinum", fullAccounts[2].cleanName)
+    }
+
+    @Test fun userCanRelabelAsSavingsOrInternal() {
+        val a = t(today, 100.0, "ZELLE TO ME", Categories.TRANSFER_OUT, user = Categories.SAVINGS)
+        val b = t(today, 60.0, "VENMO", Categories.TRANSFER_OUT, user = Categories.INTERNAL)
+        val c = Classifier(listOf(a, b), fullAccounts)
+        assertEquals(Kind.SAVINGS, c.kind(a))
+        assertEquals(Kind.INTERNAL, c.kind(b))
+    }
+
+    @Test fun monthFlowSplitsFourWays() {
+        val txns = listOf(
+            t(today, -2000.0, "PAYROLL", Categories.INCOME),
+            t(today, 400.0, "GROCERY", Categories.FOOD_AND_DRINK),
+            t(today, 300.0, "TO SAVINGS", Categories.TRANSFER_OUT),
+            t(today, -300.0, "FROM CHECKING", Categories.TRANSFER_IN, account = "sav"),
+            t(today, 285.0, "LOAN PMT", Categories.LOAN_PAYMENTS),
+            t(today, -285.0, "PAYMENT", Categories.LOAN_PAYMENTS, account = "car"),
+        )
+        val f = InsightEngine.build(txns, fullAccounts, emptyList(), today, savingsGoal = 500.0).thisMonth
+        assertEquals(2000.0, f.income, 0.001)
+        assertEquals(400.0, f.spending, 0.001)
+        assertEquals(300.0, f.saved, 0.001)
+        assertEquals(285.0, f.loanPayments, 0.001)
+        assertEquals(1015.0, f.leftOver, 0.001)
+        assertEquals(0.15, f.savingsRate!!, 0.0001)
+    }
 }

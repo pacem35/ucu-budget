@@ -32,10 +32,11 @@ import com.pacemckinney.tally.engine.Categories
 import kotlin.math.ceil
 
 @Composable
-fun BudgetsScreen(state: UiState, onSetBudget: (String, Double?) -> Unit) {
+fun BudgetsScreen(state: UiState, onSetBudget: (String, Double?) -> Unit, onSetSavingsGoal: (Double?) -> Unit) {
     val s = state.snapshot ?: return
     val tones = LocalTones.current
     var editing by remember { mutableStateOf<String?>(null) }
+    var editingGoal by remember { mutableStateOf(false) }
     val spent = s.byCategory.associate { it.category to it.amount }
     val budgeted = s.budgets.map { it.budget.category }.toSet()
     val others = Categories.budgetable.filter { it !in budgeted }
@@ -43,6 +44,35 @@ fun BudgetsScreen(state: UiState, onSetBudget: (String, Double?) -> Unit) {
     val monthFrac = s.today.dayOfMonth.toFloat() / s.month.lengthOfMonth()
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Savings goal: how much to move into savings each month.
+        item {
+            val goal = state.savingsGoal
+            val saved = s.savedMtd
+            Section(title = "Savings goal", action = { TextButton(onClick = { editingGoal = true }) { Text(if (goal > 0) "Edit" else "Set") } }) {
+                if (goal <= 0) {
+                    Text(
+                        "Set a monthly amount to move into savings. Tally tracks transfers into your savings accounts against it." +
+                            (if (saved > 0) " You've saved ${money(saved)} so far this month." else ""),
+                        style = MaterialTheme.typography.bodyMedium, color = tones.muted,
+                    )
+                } else {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(money(maxOf(saved, 0.0)), style = MaterialTheme.typography.headlineMedium.tabular(), fontWeight = FontWeight.SemiBold,
+                            color = tones.savings)
+                        Text("  of ${money(goal)}", style = MaterialTheme.typography.titleMedium, color = tones.muted,
+                            modifier = Modifier.padding(bottom = 3.dp))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Bar((saved / goal).toFloat(), if (saved >= goal) tones.good else tones.savings)
+                    Spacer(Modifier.height(6.dp))
+                    Label(when {
+                        saved < 0 -> "${money(-saved)} pulled out of savings this month"
+                        saved >= goal -> "Goal reached · savings balance ${money(s.balances.savings)}"
+                        else -> "${money(goal - saved)} to go · savings balance ${money(s.balances.savings)}"
+                    })
+                }
+            }
+        }
         item {
             val total = s.budgets.sumOf { it.budget.monthlyLimit }
             val used = s.budgets.sumOf { it.spent }
@@ -116,6 +146,34 @@ fun BudgetsScreen(state: UiState, onSetBudget: (String, Double?) -> Unit) {
                 }
             }
         }
+    }
+
+    if (editingGoal) {
+        var text by remember { mutableStateOf(state.savingsGoal.takeIf { it > 0 }?.let { "%.0f".format(it) } ?: "") }
+        val avgSaved = s.history.dropLast(1).filter { it.income > 0 }.let { h -> if (h.isEmpty()) null else h.sumOf { it.saved } / h.size }
+        AlertDialog(
+            onDismissRequest = { editingGoal = false },
+            title = { Text("Monthly savings goal") },
+            text = {
+                Column {
+                    if (avgSaved != null && avgSaved > 1) Text("You've averaged ${money(avgSaved)} a month into savings recently.",
+                        style = MaterialTheme.typography.bodyMedium, color = tones.muted)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = text, onValueChange = { v -> text = v.filter { it.isDigit() || it == '.' } },
+                        prefix = { Text("$") }, suffix = { Text("/ month") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { onSetSavingsGoal(text.toDoubleOrNull()); editingGoal = false }) { Text("Save") } },
+            dismissButton = {
+                Row {
+                    if (state.savingsGoal > 0) TextButton(onClick = { onSetSavingsGoal(null); editingGoal = false }) { Text("Remove") }
+                    TextButton(onClick = { editingGoal = false }) { Text("Cancel") }
+                }
+            },
+        )
     }
 
     editing?.let { cat ->

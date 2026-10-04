@@ -24,6 +24,8 @@ data class Tones(
     val alert: Color,
     val muted: Color,
     val chartPrev: Color,
+    val savings: Color,
+    val loan: Color,
 ) {
     fun of(s: Severity) = when (s) {
         Severity.GOOD -> good
@@ -34,7 +36,7 @@ data class Tones(
 }
 
 val LocalTones = staticCompositionLocalOf {
-    Tones(Color.Green, Color.Unspecified, Color.Green, Color.Blue, Color.Yellow, Color.Red, Color.Gray, Color.Gray)
+    Tones(Color.Green, Color.Unspecified, Color.Green, Color.Blue, Color.Yellow, Color.Red, Color.Gray, Color.Gray, Color.Blue, Color.Magenta)
 }
 
 private val DarkScheme = darkColorScheme(
@@ -84,11 +86,13 @@ private val DarkTones = Tones(
     income = Color(0xFF7EE0A8), spend = Color(0xFFDDE5DF), good = Color(0xFF7EE0A8),
     info = Color(0xFF8CC8F0), warn = Color(0xFFF2C46B), alert = Color(0xFFFF8A80),
     muted = Color(0xFF8A968F), chartPrev = Color(0xFF55615B),
+    savings = Color(0xFF8CC8F0), loan = Color(0xFFD7A6F5),
 )
 private val LightTones = Tones(
     income = Color(0xFF14724A), spend = Color(0xFF171D1A), good = Color(0xFF14724A),
     info = Color(0xFF1F6FA8), warn = Color(0xFFA86A00), alert = Color(0xFFC0362C),
     muted = Color(0xFF6B756F), chartPrev = Color(0xFFB5BEB8),
+    savings = Color(0xFF1F6FA8), loan = Color(0xFF8A4FB0),
 )
 
 private val Num = FontFamily.Monospace

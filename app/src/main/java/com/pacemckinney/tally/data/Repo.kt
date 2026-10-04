@@ -39,6 +39,10 @@ class Prefs(context: Context) {
     var biometricLock: Boolean
         get() = p.getBoolean("biometricLock", true)
         set(v) = p.edit().putBoolean("biometricLock", v).apply()
+    /** Monthly amount you want to move into savings; 0 = no goal. */
+    var savingsGoal: Double
+        get() = p.getFloat("savingsGoal", 0f).toDouble()
+        set(v) = p.edit().putFloat("savingsGoal", v.toFloat()).apply()
     var lastSync: Long
         get() = p.getLong("lastSync", 0)
         set(v) = p.edit().putLong("lastSync", v).apply()
@@ -153,6 +157,7 @@ class Repo(private val context: Context) {
         today = today,
         largeTxnThreshold = prefs.largeThreshold,
         lowBalanceThreshold = prefs.lowBalance,
+        savingsGoal = prefs.savingsGoal.takeIf { it > 0 },
     )
 
     fun resetEverything() {

@@ -36,7 +36,9 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private enum class Filter(val label: String) { ALL("All"), SPENT("Spending"), IN("Money in"), PENDING("Pending") }
+private enum class Filter(val label: String) {
+    ALL("All"), SPENT("Spending"), IN("Income"), SAVINGS("Savings"), LOANS("Loans & debt"), MOVES("Transfers"), PENDING("Pending")
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,6 +57,9 @@ fun ActivityScreen(state: UiState, onRefresh: () -> Unit, onSetCategory: (Txn, S
                 Filter.ALL -> true
                 Filter.SPENT -> k == Kind.SPEND || k == Kind.REFUND
                 Filter.IN -> k == Kind.INCOME
+                Filter.SAVINGS -> k == Kind.SAVINGS
+                Filter.LOANS -> k == Kind.LOAN_PAYMENT
+                Filter.MOVES -> k == Kind.INTERNAL || k == Kind.EXCLUDED
                 Filter.PENDING -> t.pending
             }
             passFilter && (q.isEmpty() || t.displayName.lowercase().contains(q) || t.name.lowercase().contains(q) ||
@@ -96,7 +101,7 @@ fun ActivityScreen(state: UiState, onRefresh: () -> Unit, onSetCategory: (Txn, S
                             if (net > 0) Label("${money(net)} spent")
                         }
                     }
-                    items(list, key = { it.id }) { t -> TxnRow(t, state.kinds[t.id]) { editing = t } }
+                    items(list, key = { it.id }) { t -> TxnRow(t, state.kinds[t.id], state.notes[t.id], state.accountLabels[t.accountId]) { editing = t } }
                 }
             }
         }

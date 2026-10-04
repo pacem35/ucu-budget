@@ -42,6 +42,7 @@ fun SettingsScreen(
     prefs: Prefs,
     onSaveKeys: (String, String, String) -> Unit,
     onAddBank: () -> Unit,
+    onManageAccounts: () -> Unit,
     onReauth: (String) -> Unit,
     onDisconnect: (String) -> Unit,
     onSyncMinutes: (Int) -> Unit,
@@ -69,7 +70,8 @@ fun SettingsScreen(
                 if (i > 0) HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Text(item.institution, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                 val accts = state.accounts.filter { it.itemId == item.itemId }
-                Label(accts.joinToString(" · ") { a -> a.name + (a.mask?.let { " ••$it" } ?: "") }.ifEmpty { "Waiting for first sync" })
+                val tracked = accts.count { it.included }
+                Label(if (accts.isEmpty()) "Waiting for first sync" else "$tracked of ${accts.size} accounts tracked")
                 when {
                     item.needsReauth -> Text("Sign-in expired — tap Re-connect.", color = tones.alert, style = MaterialTheme.typography.bodySmall)
                     item.lastError != null -> Text(item.lastError, color = tones.warn, style = MaterialTheme.typography.bodySmall)
@@ -79,7 +81,10 @@ fun SettingsScreen(
                     TextButton(onClick = { confirmDisconnect = item.itemId }) { Text("Disconnect", color = tones.alert) }
                 }
             }
-            OutlinedButton(onClick = onAddBank, modifier = Modifier.fillMaxWidth()) { Text("Connect another account") }
+            if (state.accounts.isNotEmpty()) OutlinedButton(onClick = onManageAccounts, modifier = Modifier.fillMaxWidth()) {
+                Text("Choose accounts & types")
+            }
+            OutlinedButton(onClick = onAddBank, modifier = Modifier.fillMaxWidth()) { Text("Connect another bank") }
         }
 
         Section(title = "Background updates") {

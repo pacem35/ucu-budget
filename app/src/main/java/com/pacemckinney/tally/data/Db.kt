@@ -5,12 +5,13 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.pacemckinney.tally.engine.Account
+import com.pacemckinney.tally.engine.AccountRole
 import com.pacemckinney.tally.engine.Budget
 import com.pacemckinney.tally.engine.Txn
 import java.time.LocalDate
 
 /** Local copy of your accounts and transactions, plus your budgets and category edits. */
-class Db(context: Context) : SQLiteOpenHelper(context, "tally.db", null, 1) {
+class Db(context: Context) : SQLiteOpenHelper(context, "tally.db", null, 2) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -25,9 +26,17 @@ class Db(context: Context) : SQLiteOpenHelper(context, "tally.db", null, 1) {
         // Kept separate so a re-sync from Plaid never wipes your edits.
         db.execSQL("CREATE TABLE overrides(txn_id TEXT PRIMARY KEY, category TEXT)")
         db.execSQL("CREATE TABLE budgets(category TEXT PRIMARY KEY, monthly_limit REAL)")
+        createAccountPrefs(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    // Your per-account choices, kept apart from the accounts table that each sync rewrites.
+    private fun createAccountPrefs(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS account_prefs(account_id TEXT PRIMARY KEY, included INTEGER, role TEXT, nickname TEXT)")
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) createAccountPrefs(db)
+    }
 
     @Synchronized
     fun upsertTxns(list: List<Txn>) {
@@ -112,15 +121,35 @@ class Db(context: Context) : SQLiteOpenHelper(context, "tally.db", null, 1) {
     }
 
     fun accounts(): List<Account> = readableDatabase.rawQuery(
-        "SELECT id, item_id, name, mask, type, subtype, current, available, credit_limit FROM accounts ORDER BY type, name", null,
+        """SELECT a.id, a.item_id, a.name, a.mask, a.type, a.subtype, a.current, a.available, a.credit_limit,
+                  p.included, p.role, p.nickname, p.account_id
+           FROM accounts a LEFT JOIN account_prefs p ON p.account_id = a.id ORDER BY a.type, a.name""", null,
     ).use { c ->
         val out = ArrayList<Account>()
         while (c.moveToNext()) out += Account(
             c.getString(0), c.getString(1), c.getString(2), c.getString(3), c.getString(4), c.getString(5),
             if (c.isNull(6)) null else c.getDouble(6), if (c.isNull(7)) null else c.getDouble(7),
             if (c.isNull(8)) null else c.getDouble(8),
+            roleOverride = c.getString(10)?.let { r -> AccountRole.entries.firstOrNull { it.name == r } },
+            included = c.isNull(9) || c.getInt(9) == 1,
+            nickname = c.getString(11),
+            reviewed = !c.isNull(12),
         )
         out
+    }
+
+    @Synchronized
+    fun setAccountPrefs(accountId: String, included: Boolean, role: AccountRole?, nickname: String?) {
+        writableDatabase.insertWithOnConflict("account_prefs", null, ContentValues().apply {
+            put("account_id", accountId); put("included", if (included) 1 else 0)
+            put("role", role?.name); put("nickname", nickname?.trim()?.ifBlank { null })
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /** Mark accounts as looked-at without changing anything (the "Looks right" button). */
+    @Synchronized
+    fun markAccountsReviewed(accounts: List<Account>) {
+        for (a in accounts.filter { !it.reviewed }) setAccountPrefs(a.id, a.included, a.roleOverride, a.nickname)
     }
 
     @Synchronized
@@ -162,6 +191,6 @@ class Db(context: Context) : SQLiteOpenHelper(context, "tally.db", null, 1) {
     @Synchronized
     fun wipe() {
         val db = writableDatabase
-        listOf("accounts", "txns", "overrides", "budgets").forEach { db.delete(it, null, null) }
+        listOf("accounts", "txns", "overrides", "budgets", "account_prefs").forEach { db.delete(it, null, null) }
     }
 }

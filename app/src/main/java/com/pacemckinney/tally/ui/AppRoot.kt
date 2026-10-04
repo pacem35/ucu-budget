@@ -47,6 +47,7 @@ interface Host {
 fun AppRoot(vm: MainViewModel, host: Host) {
     val state by vm.state.collectAsState()
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
+    var showAccounts by rememberSaveable { mutableStateOf(false) }
     val snack = remember { SnackbarHostState() }
 
     LaunchedEffect(state.message) {
@@ -72,6 +73,20 @@ fun AppRoot(vm: MainViewModel, host: Host) {
         return
     }
 
+    if (showAccounts) {
+        Scaffold(snackbarHost = { SnackbarHost(snack) }) { pad ->
+            Box(Modifier.padding(pad)) {
+                AccountsScreen(
+                    accounts = state.accounts,
+                    txnCounts = state.txnCounts,
+                    onChange = vm::setAccount,
+                    onDone = { vm.markAccountsReviewed(); showAccounts = false },
+                )
+            }
+        }
+        return
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
         bottomBar = {
@@ -90,14 +105,16 @@ fun AppRoot(vm: MainViewModel, host: Host) {
                 Tab.HOME -> HomeScreen(
                     state, onRefresh = { vm.refresh(live = true) }, onReauth = { host.connectBank(it) },
                     onSeeInsights = { tab = Tab.INSIGHTS }, onSeeBudgets = { tab = Tab.BUDGETS },
+                    onManageAccounts = { showAccounts = true },
                 )
                 Tab.ACTIVITY -> ActivityScreen(state, onRefresh = { vm.refresh(live = false) }, onSetCategory = vm::setCategory)
-                Tab.BUDGETS -> BudgetsScreen(state, vm::setBudget)
+                Tab.BUDGETS -> BudgetsScreen(state, vm::setBudget, vm::setSavingsGoal)
                 Tab.INSIGHTS -> InsightsScreen(state)
                 Tab.SETTINGS -> SettingsScreen(
                     state, vm.repo.store, vm.repo.prefs,
                     onSaveKeys = { id, s, env -> vm.saveKeys(id, s.ifBlank { vm.repo.store.secret ?: "" }, env) },
                     onAddBank = { host.connectBank() },
+                    onManageAccounts = { showAccounts = true },
                     onReauth = { host.connectBank(it) },
                     onDisconnect = vm::disconnect,
                     onSyncMinutes = { vm.repo.prefs.syncMinutes = it; host.rescheduleSync(it) },
