@@ -43,6 +43,10 @@ class Prefs(context: Context) {
     var savingsGoal: Double
         get() = p.getFloat("savingsGoal", 0f).toDouble()
         set(v) = p.edit().putFloat("savingsGoal", v.toFloat()).apply()
+    /** Set once history has been re-pulled with raw bank descriptions (needed for UCU account codes). */
+    var refetchedDescriptions: Boolean
+        get() = p.getBoolean("refetchedDescriptions", false)
+        set(v) = p.edit().putBoolean("refetchedDescriptions", v).apply()
     var lastSync: Long
         get() = p.getLong("lastSync", 0)
         set(v) = p.edit().putLong("lastSync", v).apply()
@@ -103,6 +107,12 @@ class Repo(private val context: Context) {
      */
     suspend fun sync(liveBalances: Boolean = false): SyncResult = mutex.withLock {
         val api = api() ?: return SyncResult(emptyList(), listOf("No Plaid keys"))
+        if (!prefs.refetchedDescriptions) {
+            // Starting the sync over re-sends your whole history (free; no new Plaid connection),
+            // this time with UCU's original descriptions like "Transfer to L1201".
+            store.items = store.items.map { it.copy(cursor = null) }
+            prefs.refetchedDescriptions = true
+        }
         val fresh = ArrayList<Txn>()
         val errors = ArrayList<String>()
         for (item in store.items) {

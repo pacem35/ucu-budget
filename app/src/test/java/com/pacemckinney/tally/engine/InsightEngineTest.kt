@@ -267,4 +267,68 @@ class InsightEngineTest {
         assertEquals(1015.0, f.leftOver, 0.001)
         assertEquals(0.15, f.savingsRate!!, 0.0001)
     }
+
+    // ---- UCU account codes in descriptions ----
+
+    private val ucuAccounts = listOf(
+        Account("chk", "item", "Main-Checking", "0009", "depository", "checking", 1000.0, 900.0),
+        Account("share", "item", "Share - Regular", "0001", "depository", "savings", 1.0, 0.0),
+        Account("sav", "item", "Share/Savings", "0001", "depository", "savings", 2900.0, 2900.0),
+        Account("visa", "item", "******8720 3701 Visa", "3701", "credit", "credit card", 300.0, 200.0),
+        Account("car", "item", "******8720 1201 2010 Honda Civic", "1201", "loan", "auto", 3200.0, 0.0),
+        Account("promo", "item", "******8720 2350 Promo - Unsecured", "2350", "loan", "consumer", 600.0, 0.0),
+    )
+
+    private fun u(amount: Double, original: String, account: String = "chk", cat: String = Categories.TRANSFER_OUT) =
+        Txn("u${n++}", account, amount, today, original.substringBefore("  "), null, cat, null, false, null, null, original)
+
+    @Test fun ucuLoanTransfersAreLoanPaymentsEvenWithoutTheLoanSide() {
+        val honda = u(150.0, "Withdrawal Transfer to L1201")
+        val promo = u(40.0, "Withdrawal Transfer to L2350")
+        val visa = u(30.0, "Withdrawal Transfer to L3701")
+        val c = Classifier(listOf(honda, promo, visa), ucuAccounts)
+        assertEquals(Kind.LOAN_PAYMENT, c.kind(honda))
+        assertEquals("car", c.counterpartOf(honda)?.id)
+        assertEquals(Kind.LOAN_PAYMENT, c.kind(promo))
+        assertEquals("promo", c.counterpartOf(promo)?.id)
+        // Paying the tracked Visa isn't counted; its purchases already are.
+        assertEquals(Kind.INTERNAL, c.kind(visa))
+    }
+
+    @Test fun ucuOverdraftAndManualTransfers() {
+        // Savings covers a small overdraft: savings side "to S0009", checking side "from S0001".
+        val odOut = u(23.87, "Withdrawal Transfer to S0009 overdraft transfer", account = "sav", cat = Categories.BANK_FEES)
+        val odIn = u(-23.87, "Deposit Transfer from S0001 overdraft transfer", cat = Categories.BANK_FEES)
+        val toSav = u(800.0, "Mobile banking Withdrawal Transfer to S0001 Online Banking[1818166]")
+        val atSav = u(-800.0, "Mobile banking Deposit Transfer from S0009 Online Banking[1818166]", account = "sav", cat = Categories.TRANSFER_IN)
+        val txns = listOf(odOut, odIn, toSav, atSav)
+        val c = Classifier(txns, ucuAccounts)
+        assertEquals(Kind.INTERNAL, c.kind(odOut))
+        assertEquals(Kind.SAVINGS, c.kind(odIn))      // pulled from savings
+        assertEquals("sav", c.counterpartOf(odIn)?.id) // the real savings, not the $1 share
+        assertEquals(Kind.SAVINGS, c.kind(toSav))
+        assertEquals(Kind.INTERNAL, c.kind(atSav))
+        val f = InsightEngine.flow(txns, c, java.time.YearMonth.from(today))
+        assertEquals(800.0 - 23.87, f.saved, 0.001)
+        assertEquals(0.0, f.spending, 0.001)
+        assertEquals(0.0, f.income, 0.001)
+    }
+
+    @Test fun buyNowPayLaterIsDebtNotSpending() {
+        val c1 = u(800.0, "ACH Withdrawal PAYPAL INST XFER CREDIT REPAYMEN", cat = Categories.GENERAL_SERVICES)
+        val c2 = u(31.36, "ACH Withdrawal PAYPAL INST XFER PYPL PAYMTHLY", cat = Categories.TRANSFER_OUT)
+        val c3 = u(57.0, "ACH Withdrawal PAYPAL INST XFER PAYPAL_CREDIT_C", cat = Categories.TRANSFER_OUT)
+        val shop = u(26.99, "Card purchase PAYPAL *NETFLIX.COM", cat = Categories.ENTERTAINMENT)
+        val c = Classifier(listOf(c1, c2, c3, shop), ucuAccounts)
+        assertEquals(Kind.LOAN_PAYMENT, c.kind(c1))
+        assertEquals(Kind.LOAN_PAYMENT, c.kind(c2))
+        assertEquals(Kind.LOAN_PAYMENT, c.kind(c3))
+        assertEquals(Kind.SPEND, c.kind(shop))
+    }
+
+    @Test fun transferToHiddenAccountStillCountsAsSpending() {
+        val accts = ucuAccounts + Account("reward", "item", "Checking - Reward", "0079", "depository", "checking", 1500.0, 1400.0, included = false)
+        val t = u(100.0, "Withdrawal Transfer to S0079")
+        assertEquals(Kind.SPEND, Classifier(listOf(t), accts).kind(t))
+    }
 }

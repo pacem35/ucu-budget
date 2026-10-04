@@ -21,6 +21,8 @@ data class Txn(
     /** A category the user picked by hand; wins over Plaid's. */
     val userCategory: String? = null,
     val logoUrl: String? = null,
+    /** The bank's raw description, e.g. "Withdrawal Transfer to L1201". */
+    val original: String? = null,
 ) {
     val effectiveCategory: String get() = userCategory ?: category
     val displayName: String get() = merchant?.takeIf { it.isNotBlank() } ?: name

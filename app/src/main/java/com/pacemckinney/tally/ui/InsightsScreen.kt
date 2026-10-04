@@ -2,6 +2,7 @@ package com.pacemckinney.tally.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
@@ -35,7 +36,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun InsightsScreen(state: UiState) {
+fun InsightsScreen(state: UiState, onMonth: (java.time.YearMonth) -> Unit) {
     val s = state.snapshot ?: return
     val tones = LocalTones.current
     val bills = s.recurring.filter { it.kind == Kind.SPEND }
@@ -61,7 +62,9 @@ fun InsightsScreen(state: UiState) {
                     LegendSwatch(tones.savings, "Saved")
                 }
                 Spacer(Modifier.height(12.dp))
-                HistoryTable(s.history)
+                HistoryTable(s.history, onMonth)
+                Spacer(Modifier.height(6.dp))
+                Label("Tap a month to see every transaction behind it.")
             }
         }
         if (income.isNotEmpty()) item {
@@ -166,7 +169,7 @@ private fun HistoryChart(history: List<MonthFlow>) {
 }
 
 @Composable
-private fun HistoryTable(history: List<MonthFlow>) {
+private fun HistoryTable(history: List<MonthFlow>, onMonth: (java.time.YearMonth) -> Unit) {
     val tones = LocalTones.current
     Row(Modifier.fillMaxWidth()) {
         Text("", Modifier.weight(0.8f))
@@ -176,7 +179,7 @@ private fun HistoryTable(history: List<MonthFlow>) {
         }
     }
     history.reversed().forEach { m ->
-        Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+        Row(Modifier.fillMaxWidth().clickable { onMonth(m.month) }.padding(vertical = 6.dp)) {
             Text(m.month.month.getDisplayName(java.time.format.TextStyle.SHORT, Locale.US), Modifier.weight(0.8f),
                 style = MaterialTheme.typography.bodySmall, color = tones.muted)
             listOf(

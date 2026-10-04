@@ -48,6 +48,7 @@ fun AppRoot(vm: MainViewModel, host: Host) {
     val state by vm.state.collectAsState()
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     var showAccounts by rememberSaveable { mutableStateOf(false) }
+    var detailMonth by rememberSaveable { mutableStateOf<String?>(null) }
     val snack = remember { SnackbarHostState() }
 
     LaunchedEffect(state.message) {
@@ -87,6 +88,15 @@ fun AppRoot(vm: MainViewModel, host: Host) {
         return
     }
 
+    detailMonth?.let { ym ->
+        Scaffold(snackbarHost = { SnackbarHost(snack) }) { pad ->
+            Box(Modifier.padding(pad)) {
+                MonthDetailScreen(java.time.YearMonth.parse(ym), state, onBack = { detailMonth = null }, onSetCategory = vm::setCategory)
+            }
+        }
+        return
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
         bottomBar = {
@@ -109,7 +119,7 @@ fun AppRoot(vm: MainViewModel, host: Host) {
                 )
                 Tab.ACTIVITY -> ActivityScreen(state, onRefresh = { vm.refresh(live = false) }, onSetCategory = vm::setCategory)
                 Tab.BUDGETS -> BudgetsScreen(state, vm::setBudget, vm::setSavingsGoal)
-                Tab.INSIGHTS -> InsightsScreen(state)
+                Tab.INSIGHTS -> InsightsScreen(state, onMonth = { detailMonth = it.toString() })
                 Tab.SETTINGS -> SettingsScreen(
                     state, vm.repo.store, vm.repo.prefs,
                     onSaveKeys = { id, s, env -> vm.saveKeys(id, s.ifBlank { vm.repo.store.secret ?: "" }, env) },

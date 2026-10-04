@@ -11,7 +11,7 @@ import com.pacemckinney.tally.engine.Txn
 import java.time.LocalDate
 
 /** Local copy of your accounts and transactions, plus your budgets and category edits. */
-class Db(context: Context) : SQLiteOpenHelper(context, "tally.db", null, 2) {
+class Db(context: Context) : SQLiteOpenHelper(context, "tally.db", null, 3) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -20,7 +20,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "tally.db", null, 2) {
         )
         db.execSQL(
             """CREATE TABLE txns(id TEXT PRIMARY KEY, account_id TEXT, amount REAL, date TEXT, name TEXT,
-               merchant TEXT, category TEXT, detailed TEXT, pending INTEGER, logo_url TEXT)""",
+               merchant TEXT, category TEXT, detailed TEXT, pending INTEGER, logo_url TEXT, original TEXT)""",
         )
         db.execSQL("CREATE INDEX txns_date ON txns(date)")
         // Kept separate so a re-sync from Plaid never wipes your edits.
@@ -36,6 +36,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "tally.db", null, 2) {
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) createAccountPrefs(db)
+        if (oldVersion < 3) db.execSQL("ALTER TABLE txns ADD COLUMN original TEXT")
     }
 
     @Synchronized
@@ -50,6 +51,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "tally.db", null, 2) {
                     put("date", t.date.toString()); put("name", t.name); put("merchant", t.merchant)
                     put("category", t.category); put("detailed", t.detailed)
                     put("pending", if (t.pending) 1 else 0); put("logo_url", t.logoUrl)
+                    put("original", t.original)
                 }, SQLiteDatabase.CONFLICT_REPLACE)
             }
             db.setTransactionSuccessful()
@@ -83,7 +85,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "tally.db", null, 2) {
         val args = if (since != null) arrayOf(since.toString()) else null
         readableDatabase.rawQuery(
             """SELECT t.id, t.account_id, t.amount, t.date, t.name, t.merchant, t.category, t.detailed,
-                      t.pending, t.logo_url, o.category
+                      t.pending, t.logo_url, o.category, t.original
                FROM txns t LEFT JOIN overrides o ON o.txn_id = t.id $where
                ORDER BY t.date DESC, t.pending DESC, t.id""",
             args,
@@ -95,6 +97,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "tally.db", null, 2) {
                     date = LocalDate.parse(c.getString(3)), name = c.getString(4) ?: "",
                     merchant = c.getString(5), category = c.getString(6) ?: "OTHER", detailed = c.getString(7),
                     pending = c.getInt(8) == 1, logoUrl = c.getString(9), userCategory = c.getString(10),
+                    original = c.getString(11),
                 )
             }
             return out

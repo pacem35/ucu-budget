@@ -162,6 +162,7 @@ class PlaidApi(private val clientId: String, private val secret: String, environ
             detailed = pfc?.optString("detailed")?.takeIf { it.isNotBlank() },
             pending = o.optBoolean("pending"),
             logoUrl = o.optString("logo_url").takeIf { it.isNotBlank() && it != "null" },
+            original = o.optString("original_description").takeIf { it.isNotBlank() && it != "null" },
         )
     }
 

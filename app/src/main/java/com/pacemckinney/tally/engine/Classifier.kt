@@ -37,7 +37,40 @@ class Classifier(txns: List<Txn>, accounts: List<Account> = emptyList()) {
     private val counterpart = HashMap<String, String>()
 
     init {
-        matchTransfers(txns.filter { included(it.accountId) })
+        val mine = txns.filter { included(it.accountId) }
+        resolveAccountReferences(mine)
+        matchTransfers(mine.filter { it.id !in decided })
+    }
+
+    /**
+     * UCU names the other account in transfer descriptions by its suffix: "Transfer to L1201",
+     * "Transfer from S0001 overdraft transfer". When that suffix is one of your tracked accounts we
+     * know exactly what the transfer is, even if Plaid never sends the other side (it usually
+     * doesn't for loans).
+     */
+    private fun resolveAccountReferences(txns: List<Txn>) {
+        for (t in txns) {
+            if (t.userCategory != null) continue
+            val target = referencedAccount(t) ?: continue
+            if (!target.included) continue // sent to/received from someone else's account
+            val mineRole = role(t.accountId)
+            decided[t.id] = if (t.amount > 0) pairKinds(mineRole, target.role).first else pairKinds(target.role, mineRole).second
+            counterpart[t.id] = target.id
+        }
+    }
+
+    private fun referencedAccount(t: Txn): Account? {
+        val text = listOfNotNull(t.original, t.name).joinToString(" ")
+        val m = ACCOUNT_REF.find(text) ?: return null
+        val letter = m.groupValues[1].uppercase()
+        val mask = m.groupValues[2]
+        val candidates = accountsById.values.filter { it.mask == mask && it.id != t.accountId }
+        if (candidates.isEmpty()) return null
+        val wanted = if (letter == "L") setOf(AccountRole.LOAN, AccountRole.CREDIT) else setOf(AccountRole.SPENDING, AccountRole.SAVINGS)
+        // Two UCU accounts can share a suffix (e.g. a $1 membership share and the real savings).
+        return candidates.sortedWith(
+            compareBy<Account>({ !it.included }, { it.role !in wanted }, { -(it.current ?: 0.0) }),
+        ).first()
     }
 
     private fun included(accountId: String) = accountsById[accountId]?.included ?: true
@@ -62,6 +95,8 @@ class Classifier(txns: List<Txn>, accounts: List<Account> = emptyList()) {
         return if (t.amount > 0) {
             when {
                 c == Categories.LOAN_PAYMENTS -> Kind.LOAN_PAYMENT
+                // PayPal Credit / Pay Monthly, Affirm, Klarna... are debt payments, not shopping.
+                DEBT_PAYEE.containsMatchIn(t.name) || (t.original?.let { DEBT_PAYEE.containsMatchIn(it) } ?: false) -> Kind.LOAN_PAYMENT
                 role != AccountRole.SAVINGS && (d == "TRANSFER_OUT_SAVINGS" || d == "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS") -> Kind.SAVINGS
                 else -> Kind.SPEND
             }
@@ -118,6 +153,15 @@ class Classifier(txns: List<Txn>, accounts: List<Account> = emptyList()) {
     }
 
     companion object {
+        /** "Transfer to L1201", "Transfer from S0009", "Payment Transfer from S0009". */
+        val ACCOUNT_REF = Regex("""(?i)\b(?:transfer|xfer|payment|pmt)\b.*?\b([SL])(\d{4})\b""")
+
+        val DEBT_PAYEE = Regex(
+            """(?i)credit repay|paypal[ _]?credit|pay ?mthly|paymthly|pay ?monthly|\baffirm\b|klarna|afterpay|sezzle|""" +
+                """synchrony|comenity|credit ?one|mission ?lane|capital ?one.*(pmt|payment)|discover.*(pmt|payment)|""" +
+                """amex.*(pmt|payment)|card ?services.*(pmt|payment)""",
+        )
+
         private val TRANSFERISH = setOf(
             Categories.TRANSFER_IN, Categories.TRANSFER_OUT, Categories.LOAN_PAYMENTS,
         )
