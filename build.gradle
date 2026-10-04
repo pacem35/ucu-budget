@@ -1,0 +1,5 @@
+plugins {
+    // AGP 9 has built-in Kotlin support (same toolchain as Plaid's own Link sample).
+    id 'com.android.application' version '9.0.1' apply false
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.3.10' apply false
+}

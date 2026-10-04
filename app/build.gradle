@@ -1,0 +1,73 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
+
+def ksFile = System.getenv("SIGNING_KEYSTORE_PATH")
+
+android {
+    namespace 'com.pacemckinney.tally'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "com.pacemckinney.tally"
+        minSdk 26
+        targetSdk 36
+        versionCode (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+        versionName "1.0.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
+    }
+
+    signingConfigs {
+        release {
+            if (ksFile != null && file(ksFile).exists()) {
+                storeFile file(ksFile)
+                storePassword System.getenv("SIGNING_STORE_PASSWORD")
+                keyAlias System.getenv("SIGNING_KEY_ALIAS")
+                keyPassword System.getenv("SIGNING_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ksFile != null && file(ksFile).exists()) {
+                signingConfig signingConfigs.release
+            } else {
+                signingConfig signingConfigs.debug
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        compose true
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+}
+
+dependencies {
+    implementation "com.plaid.link:sdk-core:6.2.2"
+
+    implementation platform("androidx.compose:compose-bom:2026.02.01")
+    implementation "androidx.compose.ui:ui"
+    implementation "androidx.compose.material3:material3"
+    implementation "androidx.compose.material:material-icons-extended:1.7.8"
+    implementation "androidx.activity:activity-compose:1.12.4"
+    implementation "androidx.core:core-ktx:1.16.0"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"
+    implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.10.0"
+    implementation "androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0"
+    implementation "androidx.work:work-runtime-ktx:2.10.1"
+    implementation "androidx.biometric:biometric:1.1.0"
+    implementation "androidx.fragment:fragment-ktx:1.8.9"
+
+    testImplementation "junit:junit:4.13.2"
+}
