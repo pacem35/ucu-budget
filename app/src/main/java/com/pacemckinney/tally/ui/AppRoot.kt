@@ -49,6 +49,7 @@ fun AppRoot(vm: MainViewModel, host: Host) {
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     var showAccounts by rememberSaveable { mutableStateOf(false) }
     var detailMonth by rememberSaveable { mutableStateOf<String?>(null) }
+    var showExport by rememberSaveable { mutableStateOf(false) }
     val snack = remember { SnackbarHostState() }
 
     LaunchedEffect(state.message) {
@@ -88,6 +89,13 @@ fun AppRoot(vm: MainViewModel, host: Host) {
         return
     }
 
+    if (showExport) {
+        Scaffold(snackbarHost = { SnackbarHost(snack) }) { pad ->
+            Box(Modifier.padding(pad)) { ExportScreen(vm, onBack = { showExport = false }) }
+        }
+        return
+    }
+
     detailMonth?.let { ym ->
         Scaffold(snackbarHost = { SnackbarHost(snack) }) { pad ->
             Box(Modifier.padding(pad)) {
@@ -116,6 +124,7 @@ fun AppRoot(vm: MainViewModel, host: Host) {
                     state, onRefresh = { vm.refresh(live = true) }, onReauth = { host.connectBank(it) },
                     onSeeInsights = { tab = Tab.INSIGHTS }, onSeeBudgets = { tab = Tab.BUDGETS },
                     onManageAccounts = { showAccounts = true },
+                    onExport = { showExport = true },
                 )
                 Tab.ACTIVITY -> ActivityScreen(state, onRefresh = { vm.refresh(live = false) }, onSetCategory = vm::setCategory)
                 Tab.BUDGETS -> BudgetsScreen(state, vm::setBudget, vm::setSavingsGoal)
@@ -125,6 +134,7 @@ fun AppRoot(vm: MainViewModel, host: Host) {
                     onSaveKeys = { id, s, env -> vm.saveKeys(id, s.ifBlank { vm.repo.store.secret ?: "" }, env) },
                     onAddBank = { host.connectBank() },
                     onManageAccounts = { showAccounts = true },
+                    onExport = { showExport = true },
                     onReauth = { host.connectBank(it) },
                     onDisconnect = vm::disconnect,
                     onSyncMinutes = { vm.repo.prefs.syncMinutes = it; host.rescheduleSync(it) },

@@ -29,6 +29,8 @@ data class RecurringStream(
     val nextDate: LocalDate,
     val category: String,
     val occurrences: Int,
+    /** Plaid detailed category of the latest charge, e.g. RENT_AND_UTILITIES_RENT. */
+    val detailed: String? = null,
 ) {
     val isIncome: Boolean get() = kind == Kind.INCOME
     /** Money that has to leave checking on schedule: bills, loan payments, automatic savings. */
@@ -100,6 +102,7 @@ object Recurring {
                 nextDate = next,
                 category = sorted.last().effectiveCategory,
                 occurrences = events.size,
+                detailed = sorted.last().detailed,
             )
         }
         return out.sortedBy { it.nextDate }

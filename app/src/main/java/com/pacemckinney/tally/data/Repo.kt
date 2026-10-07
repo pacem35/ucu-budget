@@ -47,6 +47,10 @@ class Prefs(context: Context) {
     var refetchedDescriptions: Boolean
         get() = p.getBoolean("refetchedDescriptions", false)
         set(v) = p.edit().putBoolean("refetchedDescriptions", v).apply()
+    /** Name printed on exported reports. */
+    var reportName: String
+        get() = p.getString("reportName", "") ?: ""
+        set(v) = p.edit().putString("reportName", v).apply()
     var lastSync: Long
         get() = p.getLong("lastSync", 0)
         set(v) = p.edit().putLong("lastSync", v).apply()

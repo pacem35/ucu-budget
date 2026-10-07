@@ -1,6 +1,8 @@
 package com.pacemckinney.tally.ui
 
 import android.text.format.DateUtils
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.size
@@ -54,6 +56,7 @@ fun HomeScreen(
     onSeeInsights: () -> Unit,
     onSeeBudgets: () -> Unit,
     onManageAccounts: () -> Unit,
+    onExport: () -> Unit,
 ) {
     val s = state.snapshot
     val tones = LocalTones.current
@@ -66,7 +69,14 @@ fun HomeScreen(
             // Header: what you have right now.
             item {
                 Column(Modifier.padding(horizontal = 4.dp, vertical = 8.dp)) {
-                    Label("Available in checking")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Label("Available in checking", Modifier.weight(1f))
+                        TextButton(onClick = onExport) {
+                            Icon(Icons.Outlined.PictureAsPdf, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Export PDF")
+                        }
+                    }
                     Text(money(s?.totalSpendable ?: 0.0), style = MaterialTheme.typography.displaySmall.tabular(),
                         fontWeight = FontWeight.SemiBold)
                     val ago = if (state.lastSync == 0L) "Not synced yet"

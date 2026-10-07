@@ -158,6 +158,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         repo.changed()
     }
 
+    /** Report for the export screen; reads straight from the database so it's never stale. */
+    suspend fun buildReport(months: Int, purchase: com.pacemckinney.tally.engine.PlannedPurchase?) =
+        withContext(Dispatchers.Default) {
+            val today = LocalDate.now()
+            com.pacemckinney.tally.engine.ReportBuilder.build(
+                repo.db.txns(today.minusMonths(months + 2L).withDayOfMonth(1)), repo.db.accounts(), today, months, purchase,
+            )
+        }
+
+    fun institutionName(): String = repo.store.items.map { it.institution }.distinct().joinToString(", ").ifBlank { "United Credit Union" }
+
     fun disconnect(itemId: String) {
         viewModelScope.launch { repo.disconnect(itemId) }
     }

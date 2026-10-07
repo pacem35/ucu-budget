@@ -43,6 +43,7 @@ fun SettingsScreen(
     onSaveKeys: (String, String, String) -> Unit,
     onAddBank: () -> Unit,
     onManageAccounts: () -> Unit,
+    onExport: () -> Unit,
     onReauth: (String) -> Unit,
     onDisconnect: (String) -> Unit,
     onSyncMinutes: (Int) -> Unit,
@@ -85,6 +86,13 @@ fun SettingsScreen(
                 Text("Choose accounts & types")
             }
             OutlinedButton(onClick = onAddBank, modifier = Modifier.fillMaxWidth()) { Text("Connect another bank") }
+        }
+
+        Section(title = "Reports") {
+            Text("Financial summary PDF for loans, dealers and landlords: income, obligations, debt-to-income and an optional purchase estimate.",
+                style = MaterialTheme.typography.bodyMedium, color = tones.muted)
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text("Export PDF") }
         }
 
         Section(title = "Background updates") {
